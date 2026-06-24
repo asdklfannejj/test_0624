@@ -121,15 +121,24 @@
           <section><h3>변화 요약</h3><div id="reportChange" class="hint">-</div></section>
           <section><h3>추이 그래프</h3><div class="report-chart-box"><canvas id="reportChartCanvas"></canvas></div></section>
           <section><h3>자동 분석 코멘트</h3><div id="reportComment" class="hint">-</div></section>
+          <section>
+            <h3>페르소나 인사이트</h3>
+            <div class="control-row" style="margin-bottom:12px">
+              <input id="geminiApiKey" type="password" placeholder="Gemini API 키 입력" style="min-width:240px;flex:1" />
+              <button id="insightBtn" class="secondary" disabled>인사이트 받기</button>
+            </div>
+            <div id="insightStatus" class="hint" style="margin-bottom:10px">API 키를 입력한 뒤 버튼을 누르면 인사이트를 생성합니다.</div>
+            <div id="insightBox" class="newsletter">아직 인사이트가 없습니다.</div>
+          </section>
         </div>
       </div>
     </section>
   </main>
 
   <script>
-    const state = { rawRows: [], headers: [], fileName: '', period: 'all', xColumn: '', yColumn: '', summary: '', chart: null, reportChart: null };
+    const state = { rawRows: [], headers: [], fileName: '', period: 'all', xColumn: '', yColumn: '', summary: '', chart: null, reportChart: null, insight: '' };
     const els = {
-      fileInput: document.getElementById('fileInput'), periodSelect: document.getElementById('periodSelect'), xColumnSelect: document.getElementById('xColumnSelect'), yColumnSelect: document.getElementById('yColumnSelect'), summaryBtn: document.getElementById('summaryBtn'), reportBtn: document.getElementById('reportBtn'), pdfBtn: document.getElementById('pdfBtn'), resetBtn: document.getElementById('resetBtn'), fileName: document.getElementById('fileName'), totalRows: document.getElementById('totalRows'), visibleRows: document.getElementById('visibleRows'), periodInfo: document.getElementById('periodInfo'), summaryBox: document.getElementById('summaryBox'), tableHead: document.getElementById('tableHead'), tableBody: document.getElementById('tableBody'), emptyMessage: document.getElementById('emptyMessage'), reportPeriod: document.getElementById('reportPeriod'), reportCurrency: document.getElementById('reportCurrency'), reportAvg: document.getElementById('reportAvg'), reportMaxMin: document.getElementById('reportMaxMin'), reportChange: document.getElementById('reportChange'), reportComment: document.getElementById('reportComment')
+      fileInput: document.getElementById('fileInput'), periodSelect: document.getElementById('periodSelect'), xColumnSelect: document.getElementById('xColumnSelect'), yColumnSelect: document.getElementById('yColumnSelect'), summaryBtn: document.getElementById('summaryBtn'), reportBtn: document.getElementById('reportBtn'), pdfBtn: document.getElementById('pdfBtn'), resetBtn: document.getElementById('resetBtn'), fileName: document.getElementById('fileName'), totalRows: document.getElementById('totalRows'), visibleRows: document.getElementById('visibleRows'), periodInfo: document.getElementById('periodInfo'), summaryBox: document.getElementById('summaryBox'), tableHead: document.getElementById('tableHead'), tableBody: document.getElementById('tableBody'), emptyMessage: document.getElementById('emptyMessage'), reportPeriod: document.getElementById('reportPeriod'), reportCurrency: document.getElementById('reportCurrency'), reportAvg: document.getElementById('reportAvg'), reportMaxMin: document.getElementById('reportMaxMin'), reportChange: document.getElementById('reportChange'), reportComment: document.getElementById('reportComment'), geminiApiKey: document.getElementById('geminiApiKey'), insightBtn: document.getElementById('insightBtn'), insightStatus: document.getElementById('insightStatus'), insightBox: document.getElementById('insightBox')
     };
 
     function parseDate(v){ if(v instanceof Date) return v; if(typeof v==='number') return new Date((v-25569)*86400*1000); const t=String(v||'').trim(); if(!t) return null; const d=new Date(t.replace(/\./g,'-').replace(/\//g,'-')); return Number.isNaN(d.getTime())?null:d; }
@@ -154,17 +163,135 @@
     function buildSummary(rows){ const stats=getNumericStats(rows); const avg=Number.isFinite(stats.avg)?stats.avg.toFixed(2):'-'; const max=Number.isFinite(stats.max)?stats.max.toFixed(2):'-'; const min=Number.isFinite(stats.min)?stats.min.toFixed(2):'-'; return `[${getPeriodLabel()} 데이터 요약]\n\n선택한 기간의 데이터는 총 ${rows.length}건입니다.\n평균값은 ${avg}, 최고값은 ${max}, 최저값은 ${min}입니다.`; }
     function buildComment(rows){ const stats=getNumericStats(rows); if(!rows.length) return '선택한 데이터가 없습니다.'; const avg=Number.isFinite(stats.avg)?stats.avg.toFixed(2):'-'; return `선택 기간의 데이터는 ${rows.length}건이며, 평균값은 ${avg}입니다. 표와 그래프를 함께 보면 변화 흐름을 쉽게 확인할 수 있습니다.`; }
     function renderReport(rows){ const stats=getNumericStats(rows); const avg=Number.isFinite(stats.avg)?stats.avg.toFixed(2):'-'; const max=Number.isFinite(stats.max)?stats.max.toFixed(2):'-'; const min=Number.isFinite(stats.min)?stats.min.toFixed(2):'-'; const xLabel=state.headers[Number(state.xColumn)]||'전체'; const yLabel=state.headers[Number(state.yColumn)]||'값'; els.reportPeriod.textContent=getPeriodLabel(); els.reportCurrency.textContent=`${xLabel} / ${yLabel}`; els.reportAvg.textContent=avg; els.reportMaxMin.textContent=`${max} / ${min}`; els.reportChange.textContent=`선택 기간 기준으로 ${rows.length}건이 표시됩니다.`; els.reportComment.textContent=buildComment(rows); if(state.reportChart) state.reportChart.destroy(); const series=buildSeries(rows).sort((a,b)=>{ const ax=a.x instanceof Date?a.x.getTime():String(a.x); const bx=b.x instanceof Date?b.x.getTime():String(b.x); return ax<bx?-1:ax>bx?1:0; }); state.reportChart=new Chart(document.getElementById('reportChartCanvas'),{ type:'line', data:{ labels:series.map(item=>item.x instanceof Date?formatDate(item.x):String(item.x)), datasets:[{ label:yLabel, data:series.map(item=>item.y), borderColor:'#00a049', backgroundColor:'rgba(0,160,73,.12)', fill:true, tension:.25, pointRadius:2 }] }, options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{display:false} }, scales:{ x:{ title:{ display:true, text:xLabel } }, y:{ title:{ display:true, text:yLabel } } } } }); }
+        function buildGeminiPayload(rows){
+      const stats = getNumericStats(rows);
+      const xLabel = state.headers[Number(state.xColumn)] || '전체';
+      const yLabel = state.headers[Number(state.yColumn)] || '값';
+      const sampleRows = rows.slice(0, 20).map((row) => Object.fromEntries(state.headers.map((h, i) => [h, formatCell(row[i])] )));
+      return {
+        period: getPeriodLabel(),
+        rowCount: rows.length,
+        colCount: state.headers.length,
+        headers: state.headers,
+        xLabel,
+        yLabel,
+        stats: {
+          avg: Number.isFinite(stats.avg) ? Number(stats.avg.toFixed(2)) : null,
+          max: Number.isFinite(stats.max) ? Number(stats.max.toFixed(2)) : null,
+          min: Number.isFinite(stats.min) ? Number(stats.min.toFixed(2)) : null
+        },
+        sampleRows
+      };
+    }
+
+    async function fetchGeminiInsight(rows){
+      const apiKey = els.geminiApiKey.value.trim();
+      if (!apiKey) throw new Error('Gemini API 키를 입력해 주세요.');
+
+      const payload = buildGeminiPayload(rows);
+      const persona = `당신은 엑셀 데이터를 분석하는 시니어 데이터 분석가이자 비즈니스 컨설턴트입니다.
+
+사용자가 제공한 엑셀 데이터, 컬럼명, 샘플 데이터, 통계 요약, 차트 정보를 기반으로 객관적인 데이터 분석 인사이트를 제공합니다.
+
+분석 원칙:
+1. 제공된 데이터에 근거해서만 판단합니다.
+2. 데이터에 없는 내용은 추측하지 않습니다.
+3. 수치 근거가 있으면 반드시 함께 제시합니다.
+4. 이상치, 추세, 패턴, 비정상 데이터, 누락값을 적극적으로 탐지합니다.
+5. 단순 요약이 아니라 사용자가 실제로 판단할 수 있는 인사이트를 제공합니다.
+6. 차트가 제공된 경우 차트에서 보이는 핵심 패턴을 설명합니다.
+7. 데이터 품질 문제가 있으면 먼저 지적합니다.
+8. 확실하지 않은 내용은 “추가 확인 필요”로 분리합니다.
+
+응답 형식은 항상 아래 구조를 따릅니다.
+
+# 데이터 개요
+- 행 수:
+- 열 수:
+- 주요 컬럼:
+- 데이터 품질:
+
+# 핵심 요약
+- 핵심 발견 1:
+- 핵심 발견 2:
+- 핵심 발견 3:
+
+# 주요 지표 분석
+- 평균/합계/최대/최소 등 중요한 수치를 설명합니다.
+- 전월 대비, 전일 대비, 전년 대비 같은 비교가 가능하면 계산합니다.
+
+# 추세 및 패턴
+- 증가/감소 추세
+- 반복 패턴
+- 계절성
+- 특정 구간의 급변 여부
+
+# 이상치 및 리스크
+- 비정상적으로 크거나 작은 값
+- 누락값
+- 중복값
+- 데이터 오류 가능성
+
+# 차트 해석
+- 제공된 차트가 있다면 차트별 핵심 메시지를 설명합니다.
+- 더 적합한 차트가 있다면 추천합니다.
+
+# 비즈니스 인사이트
+- 데이터 기반으로 중요한 의미를 해석합니다.
+- 의사결정에 영향을 줄 수 있는 내용을 우선 제시합니다.
+
+# 액션 아이템
+- 사용자가 다음에 해야 할 행동을 구체적으로 제안합니다.
+
+# 추가 확인 필요
+- 데이터만으로 확정할 수 없는 부분을 정리합니다.
+
+문체:
+- 한국어로 답변합니다.
+- 실무 보고서처럼 명확하고 간결하게 작성합니다.
+- 불필요하게 장황하지 않게 작성합니다.
+- 숫자와 근거를 우선합니다.
+- 모호한 표현보다 구체적인 표현을 사용합니다.`;
+
+      const prompt = `${persona}
+
+다음 JSON을 바탕으로만 인사이트를 작성하세요.
+${JSON.stringify(payload, null, 2)}`;
+
+      const body = {
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.2, maxOutputTokens: 2048 }
+      };
+
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${encodeURIComponent(apiKey)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`Gemini API 오류: ${res.status} ${text}`);
+      }
+
+      const json = await res.json();
+      return json?.candidates?.[0]?.content?.parts?.map((p) => p.text).join('') || '인사이트를 생성하지 못했습니다.';
+    }
     function updateVisibleCount(rows){ els.totalRows.textContent=String(state.rawRows.length); els.visibleRows.textContent=String(rows.length); }
-    function renderAll(){ const rows=getFilteredRows(); renderTableHead(); renderTable(rows); updateVisibleCount(rows); renderChart(rows); els.summaryBox.textContent=state.summary||'요약문이 여기에 표시됩니다.'; els.periodInfo.textContent=`${getPeriodLabel()} 기준으로 ${rows.length}건이 표시됩니다.`; const enabled=rows.length>0 && state.xColumn!=='' && state.yColumn!==''; els.summaryBtn.disabled=!enabled; els.reportBtn.disabled=!enabled; els.pdfBtn.disabled=!enabled; }
+    function renderAll(){ const rows=getFilteredRows(); renderTableHead(); renderTable(rows); updateVisibleCount(rows); renderChart(rows); els.summaryBox.textContent=state.summary||'요약문이 여기에 표시됩니다.'; els.periodInfo.textContent=`${getPeriodLabel()} 기준으로 ${rows.length}건이 표시됩니다.`; const enabled=rows.length>0 && state.xColumn!=='' && state.yColumn!==''; els.summaryBtn.disabled=!enabled; els.reportBtn.disabled=!enabled; els.pdfBtn.disabled=!enabled; els.insightBtn.disabled=!enabled || !els.geminiApiKey.value.trim(); }
     function handleUpload(file){ return readFirstSheet(file).then(rows=>{ const normalized=normalizeRows(rows); state.rawRows=normalized.data.filter(row=>row.some(cell=>String(cell).trim()!=='')); state.headers=normalized.headers; state.fileName=file.name; state.period='all'; state.xColumn=''; state.yColumn=''; state.summary=''; els.fileName.textContent=file.name; els.periodSelect.disabled=false; els.xColumnSelect.disabled=false; els.yColumnSelect.disabled=false; els.summaryBtn.disabled=false; els.reportBtn.disabled=false; els.pdfBtn.disabled=false; els.resetBtn.disabled=false; renderAxisOptions(state.rawRows); renderAll(); }); }
     els.fileInput.addEventListener('change', e=>{ const file=e.target.files?.[0]; if(file) handleUpload(file); });
     els.periodSelect.addEventListener('change', ()=>{ state.period=els.periodSelect.value; renderAll(); });
     els.xColumnSelect.addEventListener('change', ()=>{ state.xColumn=els.xColumnSelect.value; renderAll(); });
     els.yColumnSelect.addEventListener('change', ()=>{ state.yColumn=els.yColumnSelect.value; renderAll(); });
     els.summaryBtn.addEventListener('click', ()=>{ const rows=getFilteredRows(); state.summary=buildSummary(rows); els.summaryBox.textContent=state.summary; });
+els.geminiApiKey.addEventListener('input', ()=>{ const enabled = getFilteredRows().length>0 && state.xColumn!=='' && state.yColumn!==''; els.insightBtn.disabled = !enabled || !els.geminiApiKey.value.trim(); });
+els.insightBtn.addEventListener('click', async ()=>{ const rows = getFilteredRows(); els.insightStatus.textContent = 'Gemini에 인사이트를 요청하는 중입니다...'; els.insightBtn.disabled = true; try { const insight = await fetchGeminiInsight(rows); state.insight = insight; els.insightBox.textContent = insight; els.insightStatus.textContent = '인사이트 생성 완료'; } catch (error) { els.insightStatus.textContent = error.message || '인사이트 생성 실패'; } finally { const enabled = rows.length>0 && state.xColumn!=='' && state.yColumn!==''; els.insightBtn.disabled = !enabled || !els.geminiApiKey.value.trim(); } });
     els.reportBtn.addEventListener('click', ()=>{ renderReport(getFilteredRows()); });
     els.pdfBtn.addEventListener('click', ()=>{ html2pdf().set({ margin:10, filename:'데이터_추이_분석_보고서.pdf', image:{type:'jpeg',quality:0.98}, html2canvas:{scale:2}, jsPDF:{unit:'mm',format:'a4',orientation:'portrait'} }).from(document.getElementById('reportArea')).save(); });
-    els.resetBtn.addEventListener('click', ()=>{ state.rawRows=[]; state.headers=[]; state.fileName=''; state.period='all'; state.xColumn=''; state.yColumn=''; state.summary=''; els.fileInput.value=''; els.periodSelect.disabled=true; els.xColumnSelect.disabled=true; els.yColumnSelect.disabled=true; els.summaryBtn.disabled=true; els.reportBtn.disabled=true; els.pdfBtn.disabled=true; els.resetBtn.disabled=true; els.fileName.textContent='-'; els.totalRows.textContent='0'; els.visibleRows.textContent='0'; els.periodInfo.textContent='기간을 선택하면 표와 그래프가 자동으로 바뀝니다.'; els.summaryBox.textContent='요약문이 여기에 표시됩니다.'; els.xColumnSelect.innerHTML='<option value="">X축 컬럼 선택</option>'; els.yColumnSelect.innerHTML='<option value="">Y축 컬럼 선택</option>'; els.tableHead.innerHTML=''; els.tableBody.innerHTML='<tr><td class="empty-message" colspan="4">엑셀 파일을 업로드해 주세요.</td></tr>'; els.emptyMessage.classList.add('hidden'); els.reportPeriod.textContent='-'; els.reportCurrency.textContent='-'; els.reportAvg.textContent='-'; els.reportMaxMin.textContent='-'; els.reportChange.textContent='-'; els.reportComment.textContent='-'; if(state.chart) state.chart.destroy(); if(state.reportChart) state.reportChart.destroy(); state.chart=null; state.reportChart=null; });
+    els.resetBtn.addEventListener('click', ()=>{ state.insight=''; state.rawRows=[]; state.headers=[]; state.fileName=''; state.period='all'; state.xColumn=''; state.yColumn=''; state.summary=''; els.fileInput.value=''; els.periodSelect.disabled=true; els.xColumnSelect.disabled=true; els.yColumnSelect.disabled=true; els.summaryBtn.disabled=true; els.reportBtn.disabled=true; els.pdfBtn.disabled=true; els.resetBtn.disabled=true; els.fileName.textContent='-'; els.totalRows.textContent='0'; els.visibleRows.textContent='0'; els.periodInfo.textContent='기간을 선택하면 표와 그래프가 자동으로 바뀝니다.'; els.summaryBox.textContent='요약문이 여기에 표시됩니다.'; els.xColumnSelect.innerHTML='<option value="">X축 컬럼 선택</option>'; els.yColumnSelect.innerHTML='<option value="">Y축 컬럼 선택</option>'; els.tableHead.innerHTML=''; els.tableBody.innerHTML='<tr><td class="empty-message" colspan="4">엑셀 파일을 업로드해 주세요.</td></tr>'; els.emptyMessage.classList.add('hidden'); els.reportPeriod.textContent='-'; els.reportCurrency.textContent='-'; els.reportAvg.textContent='-'; els.reportMaxMin.textContent='-'; els.reportChange.textContent='-'; els.reportComment.textContent='-'; els.insightStatus.textContent='API 키를 입력한 뒤 버튼을 누르면 인사이트를 생성합니다.'; els.insightBox.textContent='아직 인사이트가 없습니다.'; if(state.chart) state.chart.destroy(); if(state.reportChart) state.reportChart.destroy(); state.chart=null; state.reportChart=null; });
   </script>
 </body>
 </html>
+
+
