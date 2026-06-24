@@ -260,6 +260,132 @@
       return `당신은 McKinsey 시니어 컨설턴트, 데이터 분석가, CFO 역할을 동시에 수행한다.\n\n규칙:\n- 데이터 개요를 반복하지 않는다. 행 수, 열 수, 평균값 나열 금지.\n- 원본 데이터 설명보다 비즈니스 의미와 의사결정 관점에 집중한다.\n- 모든 인사이트는 반드시 수치 근거를 포함한다.\n- 최소 5개 이상의 인사이트를 생성한다.\n- 출력은 반드시 아래 구조를 따른다.\n\n# 핵심 인사이트\n# 위험 신호\n# 성장 기회\n# 추천 액션\n# 근거 데이터\n\n입력 JSON:\n${JSON.stringify(payload, null, 2)}`;
     }
 
+    function buildGeminiPayload(rows){
+      const stats = getNumericStats(rows);
+      const xLabel = state.headers[Number(state.xColumn)] || '전체';
+      const yLabel = state.headers[Number(state.yColumn)] || '값';
+      const sampleRows = rows.slice(0, 20).map((row) => Object.fromEntries(state.headers.map((h, i) => [h, formatCell(row[i])])));
+      return {
+        summary: {
+          period: getPeriodLabel(),
+          selectedColumns: { x: xLabel, y: yLabel },
+          rowCount: rows.length,
+          columnCount: state.headers.length
+        },
+        statistics: {
+          avg: Number.isFinite(stats.avg) ? Number(stats.avg.toFixed(2)) : null,
+          max: Number.isFinite(stats.max) ? Number(stats.max.toFixed(2)) : null,
+          min: Number.isFinite(stats.min) ? Number(stats.min.toFixed(2)) : null
+        },
+        trends: buildTrendPayload(rows),
+        anomalies: buildAnomalyPayload(rows),
+        topItems: buildTopBottomPayload(rows).topItems,
+        bottomItems: buildTopBottomPayload(rows).bottomItems,
+        charts: buildChartPayload(rows),
+        sampleRows
+      };
+    }
+
+    function buildGeminiPrompt(payload){
+      return `당신은 McKinsey 시니어 컨설턴트, 데이터 분석가, CFO 역할을 동시에 수행한다.
+
+규칙:
+- 데이터 개요를 반복하지 않는다. 행 수, 열 수, 평균값 나열 금지.
+- 원본 데이터 설명보다 비즈니스 의미와 의사결정 관점에 집중한다.
+- 모든 인사이트는 반드시 수치 근거를 포함한다.
+- 최소 5개 이상의 인사이트를 생성한다.
+- 출력은 반드시 아래 구조를 따른다.
+
+# 핵심 인사이트
+# 위험 신호
+# 성장 기회
+# 추천 액션
+# 근거 데이터
+
+입력 JSON:
+${JSON.stringify(payload, null, 2)}`;
+    }
+
+    function buildTrendPayload(rows){
+      const xIndex = Number(state.xColumn);
+      const yIndex = Number(state.yColumn);
+      const series = buildSeries(rows).sort((a,b)=>{ const ax=a.x instanceof Date?a.x.getTime():String(a.x); const bx=b.x instanceof Date?b.x.getTime():String(b.x); return ax<bx?-1:ax>bx?1:0; });
+      const diffs = [];
+      for (let i = 1; i < series.length; i++) {
+        const prev = series[i - 1];
+        const curr = series[i];
+        const diff = curr.y - prev.y;
+        diffs.push({ from: prev.x instanceof Date ? formatDate(prev.x) : String(prev.x), to: curr.x instanceof Date ? formatDate(curr.x) : String(curr.x), diff: Number(diff.toFixed(2)), pct: prev.y ? Number((((diff) / prev.y) * 100).toFixed(2)) : null });
+      }
+      const longestRun = (direction) => {
+        let run = 0, best = 0;
+        diffs.forEach(d => {
+          const ok = direction === 'up' ? d.diff > 0 : d.diff < 0;
+          run = ok ? run + 1 : 0;
+          best = Math.max(best, run);
+        });
+        return best;
+      };
+      const maxIncrease = diffs.reduce((best, cur) => !best || cur.diff > best.diff ? cur : best, null);
+      const maxDecrease = diffs.reduce((best, cur) => !best || cur.diff < best.diff ? cur : best, null);
+      const rapidChanges = diffs.filter(d => d.pct !== null && Math.abs(d.pct) >= 20).slice(0, 10);
+      return {
+        maxIncrease,
+        maxDecrease,
+        consecutiveIncreaseCount: longestRun('up'),
+        consecutiveDecreaseCount: longestRun('down'),
+        rapidChanges
+      };
+    }
+
+    function buildTopBottomPayload(rows){
+      const xIndex = Number(state.xColumn);
+      const yIndex = Number(state.yColumn);
+      const items = rows.map(r => ({ label: formatCell(r[xIndex]), value: toNumber(r[yIndex]) })).filter(i => Number.isFinite(i.value));
+      const sorted = [...items].sort((a,b)=>b.value-a.value);
+      return { topItems: sorted.slice(0, 10), bottomItems: [...sorted].reverse().slice(0, 10) };
+    }
+
+    function buildAnomalyPayload(rows){
+      const yIndex = Number(state.yColumn);
+      const values = rows.map(r => toNumber(r[yIndex])).filter(Number.isFinite);
+      const sorted = [...values].sort((a,b)=>a-b);
+      const q1 = sorted.length ? sorted[Math.floor(sorted.length * 0.25)] : null;
+      const q3 = sorted.length ? sorted[Math.floor(sorted.length * 0.75)] : null;
+      const iqr = (q1 !== null && q3 !== null) ? q3 - q1 : null;
+      const lowerFence = iqr !== null ? q1 - 1.5 * iqr : null;
+      const upperFence = iqr !== null ? q3 + 1.5 * iqr : null;
+      const mean = values.length ? values.reduce((a,b)=>a+b,0)/values.length : null;
+      const std = mean !== null && values.length ? Math.sqrt(values.reduce((acc,v)=>acc + Math.pow(v - mean, 2), 0) / values.length) : null;
+      const xIndex = Number(state.xColumn);
+      const iqrOutliers = (lowerFence !== null && upperFence !== null) ? rows.filter(r => { const v = toNumber(r[yIndex]); return Number.isFinite(v) && (v < lowerFence || v > upperFence); }).slice(0, 10).map(r => ({ label: formatCell(r[xIndex]), value: toNumber(r[yIndex]) })) : [];
+      const zOutliers = (std !== null && std > 0 && mean !== null) ? rows.filter(r => { const v = toNumber(r[yIndex]); return Number.isFinite(v) && Math.abs((v - mean) / std) >= 3; }).slice(0, 10).map(r => ({ label: formatCell(r[xIndex]), value: toNumber(r[yIndex]) })) : [];
+      const missingRatio = Number((((rows.flat().filter(v => String(v).trim() === '').length) / Math.max(rows.length * state.headers.length, 1)) * 100).toFixed(1));
+      return { iqr: { lowerFence, upperFence, outliers: iqrOutliers }, zScore: { threshold: 3, outliers: zOutliers }, missingRatio };
+    }
+
+    function buildChartPayload(rows){
+      const xIndex = Number(state.xColumn);
+      const yIndex = Number(state.yColumn);
+      const series = buildSeries(rows).sort((a,b)=>{ const ax=a.x instanceof Date?a.x.getTime():String(a.x); const bx=b.x instanceof Date?b.x.getTime():String(b.x); return ax<bx?-1:ax>bx?1:0; });
+      const topCategories = (() => {
+        const map = new Map();
+        rows.forEach(r => {
+          const key = formatCell(r[xIndex]) || '미분류';
+          map.set(key, (map.get(key) || 0) + (Number.isFinite(toNumber(r[yIndex])) ? toNumber(r[yIndex]) : 0));
+        });
+        return [...map.entries()].sort((a,b)=>b[1]-a[1]).slice(0,10).map(([label,value])=>({label, value:Number(value.toFixed(2))}));
+      })();
+      return {
+        monthlyTrend: series.slice(-24).map(p => ({ label: p.x instanceof Date ? formatDate(p.x) : String(p.x), value: p.y })),
+        categoryTotals: topCategories,
+        top10: buildTopBottomPayload(rows).topItems,
+        increaseRate: series.slice(1).map((curr, i) => {
+          const prev = series[i];
+          return { label: curr.x instanceof Date ? formatDate(curr.x) : String(curr.x), pct: prev.y ? Number((((curr.y - prev.y) / prev.y) * 100).toFixed(2)) : null };
+        })
+      };
+    }
     async function fetchGeminiInsight(rows){
       const apiKey = els.geminiApiKey.value.trim();
       if (!apiKey) throw new Error('Gemini API 키를 입력해 주세요.');
@@ -305,6 +431,7 @@ els.insightBtn.addEventListener('click', async ()=>{ const rows = getFilteredRow
   </script>
 </body>
 </html>
+
 
 
 
