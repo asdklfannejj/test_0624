@@ -163,25 +163,101 @@
     function buildSummary(rows){ const stats=getNumericStats(rows); const avg=Number.isFinite(stats.avg)?stats.avg.toFixed(2):'-'; const max=Number.isFinite(stats.max)?stats.max.toFixed(2):'-'; const min=Number.isFinite(stats.min)?stats.min.toFixed(2):'-'; return `[${getPeriodLabel()} 데이터 요약]\n\n선택한 기간의 데이터는 총 ${rows.length}건입니다.\n평균값은 ${avg}, 최고값은 ${max}, 최저값은 ${min}입니다.`; }
     function buildComment(rows){ const stats=getNumericStats(rows); if(!rows.length) return '선택한 데이터가 없습니다.'; const avg=Number.isFinite(stats.avg)?stats.avg.toFixed(2):'-'; return `선택 기간의 데이터는 ${rows.length}건이며, 평균값은 ${avg}입니다. 표와 그래프를 함께 보면 변화 흐름을 쉽게 확인할 수 있습니다.`; }
     function renderReport(rows){ const stats=getNumericStats(rows); const avg=Number.isFinite(stats.avg)?stats.avg.toFixed(2):'-'; const max=Number.isFinite(stats.max)?stats.max.toFixed(2):'-'; const min=Number.isFinite(stats.min)?stats.min.toFixed(2):'-'; const xLabel=state.headers[Number(state.xColumn)]||'전체'; const yLabel=state.headers[Number(state.yColumn)]||'값'; els.reportPeriod.textContent=getPeriodLabel(); els.reportCurrency.textContent=`${xLabel} / ${yLabel}`; els.reportAvg.textContent=avg; els.reportMaxMin.textContent=`${max} / ${min}`; els.reportChange.textContent=`선택 기간 기준으로 ${rows.length}건이 표시됩니다.`; els.reportComment.textContent=buildComment(rows); if(state.reportChart) state.reportChart.destroy(); const series=buildSeries(rows).sort((a,b)=>{ const ax=a.x instanceof Date?a.x.getTime():String(a.x); const bx=b.x instanceof Date?b.x.getTime():String(b.x); return ax<bx?-1:ax>bx?1:0; }); state.reportChart=new Chart(document.getElementById('reportChartCanvas'),{ type:'line', data:{ labels:series.map(item=>item.x instanceof Date?formatDate(item.x):String(item.x)), datasets:[{ label:yLabel, data:series.map(item=>item.y), borderColor:'#00a049', backgroundColor:'rgba(0,160,73,.12)', fill:true, tension:.25, pointRadius:2 }] }, options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{display:false} }, scales:{ x:{ title:{ display:true, text:xLabel } }, y:{ title:{ display:true, text:yLabel } } } } }); }
-        function buildGeminiPayload(rows){
-      const stats = getNumericStats(rows);
-      const xLabel = state.headers[Number(state.xColumn)] || '전체';
-      const yLabel = state.headers[Number(state.yColumn)] || '값';
-      const sampleRows = rows.slice(0, 20).map((row) => Object.fromEntries(state.headers.map((h, i) => [h, formatCell(row[i])] )));
-      return {
-        period: getPeriodLabel(),
-        rowCount: rows.length,
-        colCount: state.headers.length,
-        headers: state.headers,
-        xLabel,
-        yLabel,
-        stats: {
-          avg: Number.isFinite(stats.avg) ? Number(stats.avg.toFixed(2)) : null,
-          max: Number.isFinite(stats.max) ? Number(stats.max.toFixed(2)) : null,
-          min: Number.isFinite(stats.min) ? Number(stats.min.toFixed(2)) : null
-        },
-        sampleRows
+        function summarizeColumns(rows){
+      return state.headers.map((header, index) => {
+        const values = rows.map(r => r[index]).filter(v => String(v).trim() !== '');
+        const dateCount = values.filter(v => parseDate(v)).length;
+        const numCount = values.filter(v => isNumericLike(v)).length;
+        const textCount = values.length - dateCount - numCount;
+        let type = '문자';
+        if (dateCount >= Math.max(3, Math.ceil(values.length * 0.5))) type = '날짜';
+        else if (numCount >= Math.max(3, Math.ceil(values.length * 0.5))) type = '숫자';
+        return { header, type, missingRatio: rows.length ? Number((((rows.length - values.length) / rows.length) * 100).toFixed(1)) : 0, textCount, numCount, dateCount };
+      });
+    }
+
+    function buildAnalysis(rows){
+      const columns = summarizeColumns(rows);
+      const numericCols = columns.filter(c => c.type === '숫자').map(c => c.header);
+      const dateIndex = getDateIndex();
+      const yIndex = Number(state.yColumn);
+      const xIndex = Number(state.xColumn);
+      const yValues = rows.map(r => toNumber(r[yIndex])).filter(Number.isFinite);
+      const sortedY = [...yValues].sort((a,b)=>a-b);
+      const median = sortedY.length ? sortedY[Math.floor(sortedY.length/2)] : null;
+      const mean = yValues.length ? yValues.reduce((a,b)=>a+b,0)/yValues.length : null;
+      const variance = yValues.length ? yValues.reduce((acc,v)=>acc + Math.pow(v - mean, 2), 0) / yValues.length : null;
+      const std = variance !== null ? Math.sqrt(variance) : null;
+      const q1 = sortedY.length ? sortedY[Math.floor(sortedY.length*0.25)] : null;
+      const q3 = sortedY.length ? sortedY[Math.floor(sortedY.length*0.75)] : null;
+      const iqr = q1 !== null && q3 !== null ? q3 - q1 : null;
+      const lowerFence = iqr !== null ? q1 - 1.5 * iqr : null;
+      const upperFence = iqr !== null ? q3 + 1.5 * iqr : null;
+      const outliers = (lowerFence !== null && upperFence !== null)
+        ? rows.filter(r => { const v = toNumber(r[yIndex]); return Number.isFinite(v) && (v < lowerFence || v > upperFence); }).slice(0,20)
+        : [];
+      const zOutliers = (std && std > 0)
+        ? rows.filter(r => { const v = toNumber(r[yIndex]); const z = Number.isFinite(v) ? Math.abs((v - mean) / std) : 0; return z >= 3; }).slice(0,20)
+        : [];
+      const series = buildSeries(rows).sort((a,b)=>{ const ax=a.x instanceof Date?a.x.getTime():String(a.x); const bx=b.x instanceof Date?b.x.getTime():String(b.x); return ax<bx?-1:ax>bx?1:0; });
+      const diffs = [];
+      for (let i = 1; i < series.length; i++) diffs.push({ from: series[i-1], to: series[i], diff: series[i].y - series[i-1].y, pct: series[i-1].y ? ((series[i].y - series[i-1].y) / series[i-1].y) * 100 : null });
+      const maxIncrease = diffs.length ? diffs.reduce((a,b)=>a.diff>b.diff?a:b) : null;
+      const maxDecrease = diffs.length ? diffs.reduce((a,b)=>a.diff<b.diff?a:b) : null;
+      const consecutive = { up:0, down:0, longestUp:0, longestDown:0 };
+      let runUp = 0, runDown = 0;
+      diffs.forEach(d => { if (d.diff > 0) { runUp++; runDown = 0; } else if (d.diff < 0) { runDown++; runUp = 0; } else { runUp = 0; runDown = 0; } consecutive.longestUp = Math.max(consecutive.longestUp, runUp); consecutive.longestDown = Math.max(consecutive.longestDown, runDown); });
+      const topItems = [...rows].map(r => ({ x: formatCell(r[xIndex]), y: toNumber(r[yIndex]) })).filter(i => Number.isFinite(i.y)).sort((a,b)=>b.y-a.y).slice(0,10);
+      const bottomItems = [...rows].map(r => ({ x: formatCell(r[xIndex]), y: toNumber(r[yIndex]) })).filter(i => Number.isFinite(i.y)).sort((a,b)=>a.y-b.y).slice(0,10);
+      const missingByColumn = columns.map(c => ({ column: c.header, missingRatio: c.missingRatio }));
+      const rapidChanges = diffs.filter(d => d.pct !== null && Math.abs(d.pct) >= 20).slice(0,20);
+      const categoryCounts = (() => { const map = new Map(); rows.forEach(r => { const key = String(r[xIndex] ?? '').trim() || '미분류'; map.set(key, (map.get(key) || 0) + (Number.isFinite(toNumber(r[yIndex])) ? toNumber(r[yIndex]) : 0)); }); return [...map.entries()].sort((a,b)=>b[1]-a[1]).slice(0,10).map(([k,v])=>({label:k,value:v})); })();
+      const charts = {
+        monthlyTrend: series.slice(-24).map(p => ({ label: p.x instanceof Date ? formatDate(p.x) : String(p.x), value: p.y })),
+        top10: topItems,
+        bottom10: bottomItems,
+        categorySum: categoryCounts,
+        increaseRate: diffs.map(d => ({ label: d.to.x instanceof Date ? formatDate(d.to.x) : String(d.to.x), pct: d.pct }))
       };
+      return {
+        summary: {
+          rowCount: rows.length,
+          colCount: state.headers.length,
+          period: getPeriodLabel(),
+          xLabel: state.headers[xIndex] || 'X축',
+          yLabel: state.headers[yIndex] || 'Y축',
+          dateColumn: dateIndex >= 0 ? state.headers[dateIndex] : null,
+          selectedColumns: { x: state.headers[xIndex] || null, y: state.headers[yIndex] || null }
+        },
+        statistics: {
+          numericColumns: numericCols,
+          mean: mean !== null ? Number(mean.toFixed(2)) : null,
+          median: median !== null ? Number(Number(median).toFixed(2)) : null,
+          min: sortedY.length ? sortedY[0] : null,
+          max: sortedY.length ? sortedY[sortedY.length - 1] : null,
+          stdDev: std !== null ? Number(std.toFixed(2)) : null,
+          missingDataRatio: Number(((rows.flat().filter(v => String(v).trim() === '').length / Math.max(rows.length * state.headers.length, 1)) * 100).toFixed(1))
+        },
+        trends: {
+          maxIncrease: maxIncrease ? { from: maxIncrease.from.x instanceof Date ? formatDate(maxIncrease.from.x) : String(maxIncrease.from.x), to: maxIncrease.to.x instanceof Date ? formatDate(maxIncrease.to.x) : String(maxIncrease.to.x), diff: Number(maxIncrease.diff.toFixed(2)), pct: maxIncrease.pct !== null ? Number(maxIncrease.pct.toFixed(2)) : null } : null,
+          maxDecrease: maxDecrease ? { from: maxDecrease.from.x instanceof Date ? formatDate(maxDecrease.from.x) : String(maxDecrease.from.x), to: maxDecrease.to.x instanceof Date ? formatDate(maxDecrease.to.x) : String(maxDecrease.to.x), diff: Number(maxDecrease.diff.toFixed(2)), pct: maxDecrease.pct !== null ? Number(maxDecrease.pct.toFixed(2)) : null } : null,
+          consecutiveIncreaseCount: consecutive.longestUp,
+          consecutiveDecreaseCount: consecutive.longestDown,
+          rapidChanges: rapidChanges.map(d => ({ from: d.from.x instanceof Date ? formatDate(d.from.x) : String(d.from.x), to: d.to.x instanceof Date ? formatDate(d.to.x) : String(d.to.x), pct: d.pct !== null ? Number(d.pct.toFixed(2)) : null }))
+        },
+        anomalies: {
+          iqr: { lowerFence: lowerFence !== null ? Number(lowerFence.toFixed(2)) : null, upperFence: upperFence !== null ? Number(upperFence.toFixed(2)) : null, outlierCount: outliers.length, samples: outliers.slice(0,10).map(r => ({ x: formatCell(r[xIndex]), y: toNumber(r[yIndex]) })) },
+          zScore: { threshold: 3, outlierCount: zOutliers.length, samples: zOutliers.slice(0,10).map(r => ({ x: formatCell(r[xIndex]), y: toNumber(r[yIndex]) })) },
+          missingByColumn
+        },
+        topItems: { items: topItems },
+        bottomItems: { items: bottomItems },
+        charts
+      };
+    }
+
+    function buildGeminiPrompt(payload){
+      return `당신은 McKinsey 시니어 컨설턴트, 데이터 분석가, CFO 역할을 동시에 수행한다.\n\n규칙:\n- 데이터 개요를 반복하지 않는다. 행 수, 열 수, 평균값 나열 금지.\n- 원본 데이터 설명보다 비즈니스 의미와 의사결정 관점에 집중한다.\n- 모든 인사이트는 반드시 수치 근거를 포함한다.\n- 최소 5개 이상의 인사이트를 생성한다.\n- 출력은 반드시 아래 구조를 따른다.\n\n# 핵심 인사이트\n# 위험 신호\n# 성장 기회\n# 추천 액션\n# 근거 데이터\n\n입력 JSON:\n${JSON.stringify(payload, null, 2)}`;
     }
 
     async function fetchGeminiInsight(rows){
@@ -189,93 +265,29 @@
       if (!apiKey) throw new Error('Gemini API 키를 입력해 주세요.');
 
       const payload = buildGeminiPayload(rows);
-      const persona = `당신은 엑셀 데이터를 분석하는 시니어 데이터 분석가이자 비즈니스 컨설턴트입니다.
-
-사용자가 제공한 엑셀 데이터, 컬럼명, 샘플 데이터, 통계 요약, 차트 정보를 기반으로 객관적인 데이터 분석 인사이트를 제공합니다.
-
-분석 원칙:
-1. 제공된 데이터에 근거해서만 판단합니다.
-2. 데이터에 없는 내용은 추측하지 않습니다.
-3. 수치 근거가 있으면 반드시 함께 제시합니다.
-4. 이상치, 추세, 패턴, 비정상 데이터, 누락값을 적극적으로 탐지합니다.
-5. 단순 요약이 아니라 사용자가 실제로 판단할 수 있는 인사이트를 제공합니다.
-6. 차트가 제공된 경우 차트에서 보이는 핵심 패턴을 설명합니다.
-7. 데이터 품질 문제가 있으면 먼저 지적합니다.
-8. 확실하지 않은 내용은 “추가 확인 필요”로 분리합니다.
-
-응답 형식은 항상 아래 구조를 따릅니다.
-
-# 데이터 개요
-- 행 수:
-- 열 수:
-- 주요 컬럼:
-- 데이터 품질:
-
-# 핵심 요약
-- 핵심 발견 1:
-- 핵심 발견 2:
-- 핵심 발견 3:
-
-# 주요 지표 분석
-- 평균/합계/최대/최소 등 중요한 수치를 설명합니다.
-- 전월 대비, 전일 대비, 전년 대비 같은 비교가 가능하면 계산합니다.
-
-# 추세 및 패턴
-- 증가/감소 추세
-- 반복 패턴
-- 계절성
-- 특정 구간의 급변 여부
-
-# 이상치 및 리스크
-- 비정상적으로 크거나 작은 값
-- 누락값
-- 중복값
-- 데이터 오류 가능성
-
-# 차트 해석
-- 제공된 차트가 있다면 차트별 핵심 메시지를 설명합니다.
-- 더 적합한 차트가 있다면 추천합니다.
-
-# 비즈니스 인사이트
-- 데이터 기반으로 중요한 의미를 해석합니다.
-- 의사결정에 영향을 줄 수 있는 내용을 우선 제시합니다.
-
-# 액션 아이템
-- 사용자가 다음에 해야 할 행동을 구체적으로 제안합니다.
-
-# 추가 확인 필요
-- 데이터만으로 확정할 수 없는 부분을 정리합니다.
-
-문체:
-- 한국어로 답변합니다.
-- 실무 보고서처럼 명확하고 간결하게 작성합니다.
-- 불필요하게 장황하지 않게 작성합니다.
-- 숫자와 근거를 우선합니다.
-- 모호한 표현보다 구체적인 표현을 사용합니다.`;
-
-      const prompt = `${persona}
-
-다음 JSON을 바탕으로만 인사이트를 작성하세요.
-${JSON.stringify(payload, null, 2)}`;
-
+      const prompt = buildGeminiPrompt(payload);
       const body = {
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.2, maxOutputTokens: 2048 }
+        generationConfig: { temperature: 0.2, maxOutputTokens: 2200 }
       };
 
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(apiKey)}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-      });
-
-      if (!res.ok) {
+      const modelCandidates = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+      let lastError = null;
+      for (const model of modelCandidates) {
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+        if (res.ok) {
+          const json = await res.json();
+          return json?.candidates?.[0]?.content?.parts?.map((p) => p.text).join('') || '인사이트를 생성하지 못했습니다.';
+        }
         const text = await res.text();
-        throw new Error(`Gemini API 오류: ${res.status} ${text}`);
+        lastError = new Error(`Gemini API 오류: ${res.status} ${text}`);
+        if (res.status !== 404) throw lastError;
       }
-
-      const json = await res.json();
-      return json?.candidates?.[0]?.content?.parts?.map((p) => p.text).join('') || '인사이트를 생성하지 못했습니다.';
+      throw lastError || new Error('Gemini API 호출 실패');
     }
     function updateVisibleCount(rows){ els.totalRows.textContent=String(state.rawRows.length); els.visibleRows.textContent=String(rows.length); }
     function renderAll(){ const rows=getFilteredRows(); renderTableHead(); renderTable(rows); updateVisibleCount(rows); renderChart(rows); els.summaryBox.textContent=state.summary||'요약문이 여기에 표시됩니다.'; els.periodInfo.textContent=`${getPeriodLabel()} 기준으로 ${rows.length}건이 표시됩니다.`; const enabled=rows.length>0 && state.xColumn!=='' && state.yColumn!==''; els.summaryBtn.disabled=!enabled; els.reportBtn.disabled=!enabled; els.pdfBtn.disabled=!enabled; els.insightBtn.disabled=!enabled || !els.geminiApiKey.value.trim(); }
@@ -293,6 +305,8 @@ els.insightBtn.addEventListener('click', async ()=>{ const rows = getFilteredRow
   </script>
 </body>
 </html>
+
+
 
 
 
