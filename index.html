@@ -43,7 +43,7 @@
     tbody tr:hover td{background:#183024}
     .hint{color:var(--muted);font-size:13px;line-height:1.6}
     .prompt{margin-top:14px;padding:14px 16px;border-left:4px solid var(--green);border-radius:14px;line-height:1.7}
-    .newsletter{margin-top:14px;padding:16px;border-radius:16px;line-height:1.8;white-space:pre-wrap}
+    .newsletter{margin-top:14px;padding:16px;border-radius:16px;line-height:1.8;white-space:pre-wrap;word-break:break-word;max-height:420px;overflow:auto}
     .report{padding:22px}
     .report-title{font-size:28px;margin-bottom:16px}
     .report-meta{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin:16px 0 18px}
@@ -394,7 +394,7 @@ ${JSON.stringify(payload, null, 2)}`;
       const prompt = buildGeminiPrompt(payload);
       const body = {
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.2, maxOutputTokens: 2200 }
+        generationConfig: { temperature: 0.2, maxOutputTokens: 4000 }
       };
 
       const modelCandidates = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
@@ -431,6 +431,7 @@ els.insightBtn.addEventListener('click', async ()=>{ const rows = getFilteredRow
   </script>
 </body>
 </html>
+
 
 
 
