@@ -124,7 +124,7 @@
           <section>
             <h3>페르소나 인사이트</h3>
             <div class="control-row" style="margin-bottom:12px">
-              <input id="geminiApiKey" type="password" placeholder="Gemini API 키 입력" style="min-width:240px;flex:1" />
+              <input id="geminiApiKey" type="password" placeholder="Gemini API 키를 한 번만 입력하면 저장됩니다" style="min-width:240px;flex:1" />
               <button id="insightBtn" class="secondary" disabled>인사이트 받기</button>
             </div>
             <div id="insightStatus" class="hint" style="margin-bottom:10px">API 키를 입력한 뒤 버튼을 누르면 인사이트를 생성합니다.</div>
@@ -136,12 +136,17 @@
   </main>
 
   <script>
+    const API_KEY_STORAGE_KEY = 'gemini_api_key';
     const state = { rawRows: [], headers: [], fileName: '', period: 'all', xColumn: '', yColumn: '', summary: '', chart: null, reportChart: null, insight: '' };
     const els = {
       fileInput: document.getElementById('fileInput'), periodSelect: document.getElementById('periodSelect'), xColumnSelect: document.getElementById('xColumnSelect'), yColumnSelect: document.getElementById('yColumnSelect'), summaryBtn: document.getElementById('summaryBtn'), reportBtn: document.getElementById('reportBtn'), pdfBtn: document.getElementById('pdfBtn'), resetBtn: document.getElementById('resetBtn'), fileName: document.getElementById('fileName'), totalRows: document.getElementById('totalRows'), visibleRows: document.getElementById('visibleRows'), periodInfo: document.getElementById('periodInfo'), summaryBox: document.getElementById('summaryBox'), tableHead: document.getElementById('tableHead'), tableBody: document.getElementById('tableBody'), emptyMessage: document.getElementById('emptyMessage'), reportPeriod: document.getElementById('reportPeriod'), reportCurrency: document.getElementById('reportCurrency'), reportAvg: document.getElementById('reportAvg'), reportMaxMin: document.getElementById('reportMaxMin'), reportChange: document.getElementById('reportChange'), reportComment: document.getElementById('reportComment'), geminiApiKey: document.getElementById('geminiApiKey'), insightBtn: document.getElementById('insightBtn'), insightStatus: document.getElementById('insightStatus'), insightBox: document.getElementById('insightBox')
-    };
+      };
+
+    els.geminiApiKey.value = loadSavedApiKey();
 
     function parseDate(v){ if(v instanceof Date) return v; if(typeof v==='number') return new Date((v-25569)*86400*1000); const t=String(v||'').trim(); if(!t) return null; const d=new Date(t.replace(/\./g,'-').replace(/\//g,'-')); return Number.isNaN(d.getTime())?null:d; }
+    function loadSavedApiKey(){ try { return localStorage.getItem(API_KEY_STORAGE_KEY) || ''; } catch { return ''; } }
+    function saveApiKey(value){ try { if (value) localStorage.setItem(API_KEY_STORAGE_KEY, value); else localStorage.removeItem(API_KEY_STORAGE_KEY); } catch {} }
     function formatDate(v){ const d=parseDate(v); return d ? d.toISOString().slice(0,10) : String(v||''); }
     function formatCell(v){ return v===null||v===undefined||v==='' ? '' : (v instanceof Date ? formatDate(v) : String(v)); }
     function toNumber(v){ const n=Number(String(v).replace(/,/g,'').replace(/%/g,'').trim()); return Number.isFinite(n)?n:NaN; }
@@ -423,7 +428,7 @@ ${JSON.stringify(payload, null, 2)}`;
     els.xColumnSelect.addEventListener('change', ()=>{ state.xColumn=els.xColumnSelect.value; renderAll(); });
     els.yColumnSelect.addEventListener('change', ()=>{ state.yColumn=els.yColumnSelect.value; renderAll(); });
     els.summaryBtn.addEventListener('click', ()=>{ const rows=getFilteredRows(); state.summary=buildSummary(rows); els.summaryBox.textContent=state.summary; });
-els.geminiApiKey.addEventListener('input', ()=>{ const enabled = getFilteredRows().length>0 && state.xColumn!=='' && state.yColumn!==''; els.insightBtn.disabled = !enabled || !els.geminiApiKey.value.trim(); });
+els.geminiApiKey.addEventListener('input', ()=>{ saveApiKey(els.geminiApiKey.value.trim()); const enabled = getFilteredRows().length>0 && state.xColumn!=='' && state.yColumn!==''; els.insightBtn.disabled = !enabled || !els.geminiApiKey.value.trim(); });
 els.insightBtn.addEventListener('click', async ()=>{ const rows = getFilteredRows(); els.insightStatus.textContent = 'Gemini에 인사이트를 요청하는 중입니다...'; els.insightBtn.disabled = true; try { const insight = await fetchGeminiInsight(rows); state.insight = insight; els.insightBox.textContent = insight; els.insightStatus.textContent = '인사이트 생성 완료'; } catch (error) { els.insightStatus.textContent = error.message || '인사이트 생성 실패'; } finally { const enabled = rows.length>0 && state.xColumn!=='' && state.yColumn!==''; els.insightBtn.disabled = !enabled || !els.geminiApiKey.value.trim(); } });
     els.reportBtn.addEventListener('click', ()=>{ renderReport(getFilteredRows()); });
     els.pdfBtn.addEventListener('click', ()=>{ html2pdf().set({ margin:10, filename:'데이터_추이_분석_보고서.pdf', image:{type:'jpeg',quality:0.98}, html2canvas:{scale:2}, jsPDF:{unit:'mm',format:'a4',orientation:'portrait'} }).from(document.getElementById('reportArea')).save(); });
