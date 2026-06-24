@@ -1,0 +1,401 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Chapter 3 Financial Data Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+  <style>
+    :root{--g:#00a049;--g2:#0b7b3d;--card:#fff;--text:#173127;--muted:#5f6f66;--line:#d9e5dd;--shadow:0 16px 40px rgba(22,48,36,.08)}
+    *{box-sizing:border-box}
+    body{margin:0;font-family:Arial,Helvetica,sans-serif;color:var(--text);background:radial-gradient(circle at top left, rgba(0,160,73,.12), transparent 30%), linear-gradient(180deg,#eef6ef 0%, #f8fbf9 100%)}
+    .wrap{max-width:1280px;margin:0 auto;padding:24px}
+    .hero{background:linear-gradient(135deg,var(--g2),var(--g));color:#fff;border-radius:28px;padding:28px 30px;box-shadow:var(--shadow)}
+    .eyebrow{display:inline-block;background:rgba(255,255,255,.16);padding:7px 12px;border-radius:999px;font-weight:700;font-size:12px}
+    h1,h2,p{margin:0}
+    .hero h1{margin-top:14px;font-size:34px}
+    .hero p{margin-top:10px;line-height:1.7;max-width:900px;opacity:.95}
+    .grid{display:grid;grid-template-columns:1.1fr .9fr;gap:20px;margin-top:20px}
+    .card{background:var(--card);border:1px solid var(--line);border-radius:22px;padding:20px;box-shadow:var(--shadow)}
+    .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:14px}
+    input,button,select{font:inherit;border-radius:12px;border:1px solid var(--line);padding:12px 14px;background:#fff}
+    button{background:var(--g);color:#fff;border:none;cursor:pointer;font-weight:700}
+    button.secondary{background:#e9f5ec;color:var(--g2);border:1px solid #cfe5d5}
+    button:disabled{opacity:.45;cursor:not-allowed}
+    .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:16px}
+    .stat{padding:14px;border-radius:16px;background:#f7fbf8;border:1px solid var(--line)}
+    .stat .label{font-size:12px;color:var(--muted)}
+    .stat .value{font-size:22px;font-weight:800;margin-top:8px}
+    .section{margin-top:20px}
+    .chart-box{height:360px}
+    .table-wrap{overflow:auto;max-height:380px;border:1px solid var(--line);border-radius:16px;margin-top:14px}
+    table{width:100%;border-collapse:collapse;background:#fff}
+    th,td{padding:10px 12px;border-bottom:1px solid #edf2ee;text-align:left;white-space:nowrap}
+    th{position:sticky;top:0;background:#f4faf5;z-index:1}
+    .hint{color:var(--muted);font-size:13px;line-height:1.6}
+    .prompt{margin-top:14px;padding:14px 16px;border-left:4px solid var(--g);background:#f5fbf7;border-radius:14px;line-height:1.7}
+    .tabs{display:flex;gap:8px;flex-wrap:wrap}
+    .tab{padding:10px 14px;border-radius:999px;border:1px solid var(--line);background:#fff;color:var(--text);cursor:pointer;font-weight:700}
+    .tab.active{background:var(--g);color:#fff;border-color:var(--g)}
+    @media (max-width:960px){.grid,.stats{grid-template-columns:1fr}.hero h1{font-size:28px}}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="hero">
+      <span class="eyebrow">Chapter 3</span>
+      <h1>Financial Data Analysis Web App</h1>
+      <p>Based on the class prompts, this single HTML file supports exchange rates, card usage trends, and interest rates with upload, table, chart, summary, and PDF output.</p>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <h2>Upload Files</h2>
+        <p class="hint" style="margin-top:8px">Supports `exchange_rate.xls`, `card_trend.xlsx`, and `interest_rate.xlsx`. It reads the first valid sheet and the first usable table.</p>
+        <div class="controls">
+          <input type="file" id="fileInput" accept=".xls,.xlsx,.csv" />
+          <div class="tabs" id="datasetTabs">
+            <button class="tab active" data-dataset="auto">Auto</button>
+            <button class="tab" data-dataset="exchange">Exchange</button>
+            <button class="tab" data-dataset="card">Card Trend</button>
+            <button class="tab" data-dataset="interest">Interest Rate</button>
+          </div>
+        </div>
+        <div class="controls" style="margin-top:10px">
+          <button id="loadExchangeBtn" class="secondary">Load exchange_rate.xls</button>
+          <button id="loadCardBtn" class="secondary">Load card_trend.xlsx</button>
+          <button id="loadInterestBtn" class="secondary">Load interest_rate.xlsx</button>
+        </div>
+        <p class="hint" id="fileStatus" style="margin-top:10px">No file loaded yet.</p>
+        <div class="controls" style="margin-top:10px">
+          <select id="periodSelect" disabled>
+            <option value="all">All</option>
+            <option value="1">Recent 1 month</option>
+            <option value="3">Recent 3 months</option>
+            <option value="6">Recent 6 months</option>
+          </select>
+          <button id="pdfBtn" class="secondary" disabled>Download PDF</button>
+          <button id="resetBtn" class="secondary">Reset</button>
+        </div>
+        <div class="stats">
+          <div class="stat"><div class="label">Rows</div><div class="value" id="countStat">-</div></div>
+          <div class="stat"><div class="label">Average</div><div class="value" id="avgStat">-</div></div>
+          <div class="stat"><div class="label">Max</div><div class="value" id="maxStat">-</div></div>
+          <div class="stat"><div class="label">Min</div><div class="value" id="minStat">-</div></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Prompt Notes</h2>
+        <div class="prompt">
+          <div>- Build as a single HTML file</div>
+          <div>- Use a green theme similar to Hana Bank</div>
+          <div>- Upload Excel and show table, chart, summary, report</div>
+          <div>- Support exchange rate, card usage trend, and interest rate trend</div>
+        </div>
+        <p class="hint" id="summaryText" style="margin-top:14px">Summary text will appear here after upload.</p>
+      </div>
+    </div>
+
+    <div class="grid section">
+      <div class="card">
+        <h2 id="chartTitle">Analysis Chart</h2>
+        <div class="chart-box"><canvas id="chartCanvas"></canvas></div>
+      </div>
+      <div class="card">
+        <h2 id="tableTitle">Data Table</h2>
+        <div class="table-wrap">
+          <table>
+            <thead id="thead"></thead>
+            <tbody id="tableBody"><tr><td class="hint">No file uploaded yet.</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const fileInput = document.getElementById('fileInput');
+    const datasetTabs = document.getElementById('datasetTabs');
+    const periodSelect = document.getElementById('periodSelect');
+    const pdfBtn = document.getElementById('pdfBtn');
+    const resetBtn = document.getElementById('resetBtn');
+    const loadExchangeBtn = document.getElementById('loadExchangeBtn');
+    const loadCardBtn = document.getElementById('loadCardBtn');
+    const loadInterestBtn = document.getElementById('loadInterestBtn');
+    const fileStatus = document.getElementById('fileStatus');
+    const thead = document.getElementById('thead');
+    const tableBody = document.getElementById('tableBody');
+    const summaryText = document.getElementById('summaryText');
+    const chartTitle = document.getElementById('chartTitle');
+    const tableTitle = document.getElementById('tableTitle');
+    const countStat = document.getElementById('countStat');
+    const avgStat = document.getElementById('avgStat');
+    const maxStat = document.getElementById('maxStat');
+    const minStat = document.getElementById('minStat');
+
+    let rawRows = [];
+    let currentDataset = 'auto';
+    let chart;
+
+    const cfg = {
+      exchange: { chart: 'Exchange Rate Trend', headers: ['Date', 'Currency', 'Rate'], empty: 'Exchange rate data will be shown here.' },
+      card: { chart: 'Card Usage Trend', headers: ['Month', 'Sector', 'Amount', 'MoM'], empty: 'Card usage trend data will be shown here.' },
+      interest: { chart: 'Interest Rate Trend', headers: ['Date', 'Base Rate', 'Market Rate', 'Outlook'], empty: 'Interest rate trend data will be shown here.' }
+    };
+
+    function setActiveTab(dataset) {
+      currentDataset = dataset;
+      [...datasetTabs.querySelectorAll('.tab')].forEach(btn => btn.classList.toggle('active', btn.dataset.dataset === dataset));
+      if (rawRows.length) render(rawRows);
+    }
+
+    function formatDate(value) {
+      if (!value) return '';
+      const d = value instanceof Date ? value : new Date(value);
+      if (Number.isNaN(d.getTime())) return String(value).slice(0, 10);
+      return d.toISOString().slice(0, 10);
+    }
+
+    function decodeCsv(arrayBuffer) {
+      const bytes = new Uint8Array(arrayBuffer);
+      for (const enc of ['euc-kr', 'cp949', 'utf-8']) {
+        try { return new TextDecoder(enc).decode(bytes).replace(/^\uFEFF/, ''); } catch {}
+      }
+      return new TextDecoder('utf-8').decode(bytes).replace(/^\uFEFF/, '');
+    }
+
+    function detectDataset(fileName, firstRow) {
+      const lower = fileName.toLowerCase();
+      if (lower.includes('card')) return 'card';
+      if (lower.includes('interest')) return 'interest';
+      if (lower.includes('exchange')) return 'exchange';
+      const keys = Object.keys(firstRow || {}).join(' ').toLowerCase();
+      if (keys.includes('sector') || keys.includes('amount') || keys.includes('usage')) return 'card';
+      if (keys.includes('base') || keys.includes('market') || keys.includes('forecast')) return 'interest';
+      return 'exchange';
+    }
+
+    function toNumber(v) {
+      const n = Number(String(v).replace(/,/g, '').replace(/%/g, ''));
+      return Number.isFinite(n) ? n : NaN;
+    }
+
+    function pick(row, names) {
+      const keys = Object.keys(row || {});
+      for (const name of names) {
+        const hit = keys.find(k => String(k).trim().toLowerCase() === String(name).toLowerCase());
+        if (hit !== undefined) return row[hit];
+      }
+      return '';
+    }
+
+    function normalizeRow(row, dataset) {
+      if (dataset === 'card') {
+        return {
+          month: String(pick(row, ['month', 'date', 'period', 'ym'])).trim(),
+          sector: String(pick(row, ['sector', 'category', 'industry'])).trim(),
+          amount: toNumber(pick(row, ['amount', 'usage_amount', 'value'])),
+          change: String(pick(row, ['mom', 'change', 'rate', 'ratio'])).trim()
+        };
+      }
+      if (dataset === 'interest') {
+        return {
+          date: pick(row, ['date', 'month', 'period']),
+          base: toNumber(pick(row, ['base', 'base_rate'])),
+          market: toNumber(pick(row, ['market', 'market_rate'])),
+          outlook: String(pick(row, ['forecast', 'outlook'])).trim()
+        };
+      }
+      const values = Object.values(row).filter(v => String(v).trim() !== '');
+      const date = pick(row, ['date', 'time', 'day', 'period']) || values[0] || '';
+      const nums = values.map(toNumber).filter(Number.isFinite);
+      const rate = toNumber(pick(row, ['rate', 'exchange_rate', 'value'])) || nums[0] || NaN;
+      const currency = pick(row, ['currency', 'country', 'unit']) || 'USD';
+      return { date, currency, rate };
+    }
+
+    function filterByPeriod(rows) {
+      const period = periodSelect.value;
+      if (period === 'all') return rows;
+      const months = Number(period);
+      const cutoff = new Date();
+      cutoff.setMonth(cutoff.getMonth() - months);
+      return rows.filter(r => {
+        const d = new Date(r.date);
+        return !Number.isNaN(d.getTime()) && d >= cutoff;
+      });
+    }
+
+    function renderTable(headers, rows, mapper) {
+      thead.innerHTML = `<tr>${headers.map(h => `<th>${h}</th>`).join('')}</tr>`;
+      tableBody.innerHTML = rows.slice(0, 200).map(mapper).join('');
+    }
+
+    function destroyChart() { if (chart) chart.destroy(); chart = null; }
+
+    function activeDataset(rows) {
+      return currentDataset === 'auto' ? detectDataset('x', rows[0]) : currentDataset;
+    }
+
+    function render(rows) {
+      const dataset = activeDataset(rows);
+      const c = cfg[dataset];
+      chartTitle.textContent = c.chart;
+      tableTitle.textContent = c.headers.join(' / ');
+
+      const filtered = filterByPeriod(rows);
+      if (!filtered.length) {
+        countStat.textContent = avgStat.textContent = maxStat.textContent = minStat.textContent = '-';
+        summaryText.textContent = c.empty;
+        thead.innerHTML = '';
+        tableBody.innerHTML = '<tr><td class="hint">No data.</td></tr>';
+        destroyChart();
+        return;
+      }
+
+      if (dataset === 'card') {
+        const rows2 = filtered.filter(r => r.month || r.sector);
+        countStat.textContent = `${rows2.length}`;
+        const amounts = rows2.map(r => r.amount).filter(Number.isFinite);
+        avgStat.textContent = amounts.length ? Math.round(amounts.reduce((a,b)=>a+b,0) / amounts.length).toLocaleString('en-US') : '-';
+        maxStat.textContent = amounts.length ? Math.max(...amounts).toLocaleString('en-US') : '-';
+        minStat.textContent = amounts.length ? Math.min(...amounts).toLocaleString('en-US') : '-';
+        summaryText.textContent = `Loaded ${rows2.length} card-trend rows. Compare spending by sector and observe the month-over-month pattern.`;
+        renderTable(['Month', 'Sector', 'Amount', 'MoM'], rows2, r => `<tr><td>${r.month}</td><td>${r.sector}</td><td>${Number.isFinite(r.amount) ? r.amount.toLocaleString('en-US') : ''}</td><td>${r.change}</td></tr>`);
+        const grouped = {};
+        rows2.forEach(r => grouped[r.sector || 'Other'] = (grouped[r.sector || 'Other'] || 0) + (r.amount || 0));
+        destroyChart();
+        chart = new Chart(document.getElementById('chartCanvas'), { type:'bar', data:{ labels:Object.keys(grouped), datasets:[{ label:'Amount by sector', data:Object.values(grouped), backgroundColor:'#00a049' }] }, options:{ responsive:true, maintainAspectRatio:false } });
+        return;
+      }
+
+      if (dataset === 'interest') {
+        const rows2 = filtered.filter(r => r.date);
+        countStat.textContent = `${rows2.length}`;
+        avgStat.textContent = '-'; maxStat.textContent = '-'; minStat.textContent = '-';
+        summaryText.textContent = `Loaded ${rows2.length} interest-rate rows. This view compares base rate and market rate over time.`;
+        renderTable(['Date', 'Base Rate', 'Market Rate', 'Outlook'], rows2, r => `<tr><td>${formatDate(r.date)}</td><td>${Number.isFinite(r.base) ? (r.base*100).toFixed(2)+'%' : ''}</td><td>${Number.isFinite(r.market) ? (r.market*100).toFixed(2)+'%' : ''}</td><td>${r.outlook}</td></tr>`);
+        destroyChart();
+        chart = new Chart(document.getElementById('chartCanvas'), {
+          type:'line',
+          data:{ labels:rows2.map(r => formatDate(r.date)), datasets:[
+            { label:'Base Rate', data:rows2.map(r => Number.isFinite(r.base) ? r.base*100 : null), borderColor:'#00a049', backgroundColor:'rgba(0,160,73,.12)', fill:true, tension:.25 },
+            { label:'Market Rate', data:rows2.map(r => Number.isFinite(r.market) ? r.market*100 : null), borderColor:'#0d5bd7', backgroundColor:'rgba(13,91,215,.12)', fill:false, tension:.25 }
+          ]},
+          options:{ responsive:true, maintainAspectRatio:false, scales:{ y:{ title:{ display:true, text:'Rate (%)' } }, x:{ title:{ display:true, text:'Date' } } } }
+        });
+        return;
+      }
+
+      const rows2 = filtered.filter(r => r.date && Number.isFinite(r.rate));
+      countStat.textContent = `${rows2.length}`;
+      const rates = rows2.map(r => r.rate);
+      const avg = rates.reduce((a,b)=>a+b,0) / rates.length;
+      avgStat.textContent = avg.toFixed(2);
+      maxStat.textContent = Math.max(...rates).toFixed(2);
+      minStat.textContent = Math.min(...rates).toFixed(2);
+      summaryText.textContent = `Loaded ${rows2.length} exchange-rate rows. You can inspect the trend and compare average, max, and min values.`;
+      renderTable(['Date', 'Currency', 'Rate'], rows2, r => `<tr><td>${formatDate(r.date)}</td><td>${r.currency}</td><td>${r.rate.toFixed(2)}</td></tr>`);
+      destroyChart();
+      chart = new Chart(document.getElementById('chartCanvas'), {
+        type:'line',
+        data:{ labels:rows2.map(r => formatDate(r.date)), datasets:[{ label:'Exchange Rate Trend', data:rows2.map(r => r.rate), borderColor:'#00a049', backgroundColor:'rgba(0,160,73,.12)', fill:true, tension:.25, pointRadius:2 }] },
+        options:{ responsive:true, maintainAspectRatio:false, scales:{ y:{ title:{ display:true, text:'Rate' } }, x:{ title:{ display:true, text:'Date' } } } }
+      });
+    }
+
+    async function readWorkbook(file) {
+      const buf = await file.arrayBuffer();
+      if (file.name.toLowerCase().endsWith('.csv')) {
+        const text = decodeCsv(buf);
+        const wb = XLSX.read(text, { type:'string' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        return XLSX.utils.sheet_to_json(ws, { defval:'' });
+      }
+      const wb = XLSX.read(buf, { type:'array' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      return XLSX.utils.sheet_to_json(ws, { defval:'' });
+    }
+
+    async function loadFromServer(fileName) {
+      const res = await fetch(`/files/${encodeURIComponent(fileName)}`);
+      if (!res.ok) throw new Error(`Failed to load ${fileName}`);
+      const buf = await res.arrayBuffer();
+      const ext = fileName.toLowerCase().split('.').pop();
+      if (ext === 'csv') {
+        const text = decodeCsv(buf);
+        const wb = XLSX.read(text, { type:'string' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        return XLSX.utils.sheet_to_json(ws, { defval:'' });
+      }
+      const wb = XLSX.read(buf, { type:'array' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      return XLSX.utils.sheet_to_json(ws, { defval:'' });
+    }
+
+    async function loadDatasetFromFileName(fileName, forcedDataset) {
+      const json = await loadFromServer(fileName);
+      const firstRow = json.find(r => Object.keys(r).length);
+      const dataset = forcedDataset || detectDataset(fileName, firstRow);
+      rawRows = json.filter(row => Object.values(row).some(v => String(v).trim() !== '')).map(row => normalizeRow(row, dataset));
+      currentDataset = dataset;
+      periodSelect.disabled = false;
+      pdfBtn.disabled = false;
+      fileStatus.textContent = `Loaded ${fileName}`;
+      render(rawRows);
+    }
+
+    fileInput.addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const json = await readWorkbook(file);
+      const firstRow = json.find(r => Object.keys(r).length);
+      const dataset = currentDataset === 'auto' ? detectDataset(file.name, firstRow) : currentDataset;
+      rawRows = json.filter(row => Object.values(row).some(v => String(v).trim() !== '')).map(row => normalizeRow(row, dataset));
+      currentDataset = dataset;
+      periodSelect.disabled = false;
+      pdfBtn.disabled = false;
+      fileStatus.textContent = `Loaded local file: ${file.name}`;
+      render(rawRows);
+    });
+
+    datasetTabs.addEventListener('click', (e) => {
+      const btn = e.target.closest('.tab');
+      if (!btn) return;
+      setActiveTab(btn.dataset.dataset);
+    });
+
+    periodSelect.addEventListener('change', () => { if (rawRows.length) render(rawRows); });
+    loadExchangeBtn.addEventListener('click', () => loadDatasetFromFileName('exchange_rate.xls', 'exchange').catch(err => fileStatus.textContent = err.message));
+    loadCardBtn.addEventListener('click', () => loadDatasetFromFileName('card_trend.xlsx', 'card').catch(err => fileStatus.textContent = err.message));
+    loadInterestBtn.addEventListener('click', () => loadDatasetFromFileName('interest_rate.xlsx', 'interest').catch(err => fileStatus.textContent = err.message));
+    pdfBtn.addEventListener('click', () => {
+      html2pdf().set({
+        margin: 10,
+        filename: 'chapter3_financial_report.pdf',
+        image: { type:'jpeg', quality:0.98 },
+        html2canvas: { scale:2 },
+        jsPDF: { unit:'mm', format:'a4', orientation:'portrait' }
+      }).from(document.querySelector('.wrap')).save();
+    });
+    resetBtn.addEventListener('click', () => {
+      fileInput.value = '';
+      rawRows = [];
+      currentDataset = 'auto';
+      periodSelect.value = 'all';
+      periodSelect.disabled = true;
+      pdfBtn.disabled = true;
+      countStat.textContent = avgStat.textContent = maxStat.textContent = minStat.textContent = '-';
+      summaryText.textContent = 'Summary text will appear here after upload.';
+      fileStatus.textContent = 'No file loaded yet.';
+      thead.innerHTML = '';
+      tableBody.innerHTML = '<tr><td class="hint">No file uploaded yet.</td></tr>';
+      destroyChart();
+      setActiveTab('auto');
+    });
+  </script>
+</body>
+</html>

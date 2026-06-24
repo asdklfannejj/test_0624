@@ -1,0 +1,655 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>엑셀 데이터 시각화 웹앱</title>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+  <style>
+    :root{
+      --green:#00a049;
+      --green-dark:#08753a;
+      --bg:#f4f8f5;
+      --card:#ffffff;
+      --text:#173127;
+      --muted:#5f6f66;
+      --line:#d9e5dd;
+      --shadow:0 16px 40px rgba(22,48,36,.08);
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      font-family:Arial, Helvetica, sans-serif;
+      color:var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(0,160,73,.12), transparent 30%),
+        linear-gradient(180deg,#eef6ef 0%, #f8fbf9 100%);
+    }
+    .wrap{max-width:1280px;margin:0 auto;padding:24px}
+    .hero{
+      background:linear-gradient(135deg,var(--green-dark),var(--green));
+      color:#fff;border-radius:28px;padding:28px 30px;box-shadow:var(--shadow)
+    }
+    .eyebrow{display:inline-block;background:rgba(255,255,255,.16);padding:7px 12px;border-radius:999px;font-weight:700;font-size:12px}
+    h1,h2,h3,p{margin:0}
+    .hero h1{margin-top:14px;font-size:34px}
+    .hero p{margin-top:10px;line-height:1.7;max-width:980px;opacity:.95}
+    .grid{display:grid;grid-template-columns:1.1fr .9fr;gap:20px;margin-top:20px}
+    .card{background:var(--card);border:1px solid var(--line);border-radius:22px;padding:20px;box-shadow:var(--shadow)}
+    .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:14px}
+    input,button,select{font:inherit;border-radius:14px;border:1px solid var(--line);padding:12px 14px;background:#fff;color:var(--text)}
+    button{background:var(--green);color:#fff;border:none;cursor:pointer;font-weight:700}
+    button.secondary{background:#fff;color:var(--text);border:1px solid var(--line)}
+    button:disabled,input:disabled,select:disabled{opacity:.55;cursor:not-allowed}
+    .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:16px}
+    .stat{padding:14px;border-radius:16px;background:#f7fbf8;border:1px solid var(--line)}
+    .stat .label{font-size:12px;color:var(--muted)}
+    .stat .value{font-size:22px;font-weight:800;margin-top:8px;word-break:break-all}
+    .section{margin-top:20px}
+    .chart-box{height:360px}
+    .table-wrap{overflow:auto;max-height:380px;border:1px solid var(--line);border-radius:16px;margin-top:14px}
+    table{width:100%;border-collapse:collapse;background:#fff;min-width:760px}
+    th,td{padding:10px 12px;border-bottom:1px solid #edf2ee;text-align:left;white-space:nowrap}
+    th{position:sticky;top:0;background:#f4faf5;z-index:1}
+    tbody tr:nth-child(odd) td{background:#fff}
+    tbody tr:nth-child(even) td{background:#f9fbfe}
+    tbody tr:hover td{background:#eef6ff}
+    .hint{color:var(--muted);font-size:13px;line-height:1.6}
+    .prompt{margin-top:14px;padding:14px 16px;border-left:4px solid var(--green);background:#f5fbf7;border-radius:14px;line-height:1.7}
+    .subgrid{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:20px}
+    .report{
+      background:#fff;border:1px solid var(--line);border-radius:22px;padding:22px;box-shadow:var(--shadow)
+    }
+    .report-title{font-size:28px;margin-bottom:10px}
+    .report-meta{
+      display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin:16px 0 18px;
+    }
+    .meta-item{background:#f8fbf8;border:1px solid var(--line);border-radius:14px;padding:12px}
+    .meta-item span{display:block;font-size:12px;color:var(--muted);margin-bottom:6px}
+    .meta-item strong{font-size:15px}
+    .report-body{display:grid;gap:14px;line-height:1.8}
+    .report-body section{padding:14px 0;border-top:1px solid #edf2ee}
+    .report-body section:first-child{border-top:none;padding-top:0}
+    .newsletter{
+      background:#f8fbff;border:1px solid var(--line);border-radius:16px;padding:16px;line-height:1.8;white-space:pre-wrap
+    }
+    .report-chart-box{height:320px;margin-top:10px}
+    .empty-message{margin:0;padding:18px 20px 22px;text-align:center;color:var(--muted)}
+    .hidden{display:none}
+    @media (max-width:960px){
+      .hero h1{font-size:28px}
+      .grid,.subgrid,.report-meta,.stats{grid-template-columns:1fr}
+    }
+    @media print{
+      body{background:#fff}
+      .hero,.controls,.table-card{display:none !important}
+      .report{box-shadow:none}
+    }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <section class="hero card">
+      <div>
+        <span class="eyebrow">엑셀 분석</span>
+        <h1>엑셀 업로드 데이터 시각화 웹앱</h1>
+        <p>엑셀 파일을 업로드하면 첫 번째 시트를 읽어서 표로 보여주고, 날짜·숫자 컬럼을 자동 감지해 기간 필터, 차트, 요약, 보고서, PDF 다운로드까지 사용할 수 있습니다.</p>
+      </div>
+      <div class="stats">
+        <div class="stat"><span class="label">업로드 파일명</span><strong id="fileName">-</strong></div>
+        <div class="stat"><span class="label">총 행 개수</span><strong id="totalRows">0</strong></div>
+        <div class="stat"><span class="label">표시 행 개수</span><strong id="visibleRows">0</strong></div>
+      </div>
+    </section>
+
+    <section class="controls card">
+      <div class="control-row">
+        <label class="file-btn">
+          <input id="fileInput" type="file" accept=".xls,.xlsx" />
+          <span>엑셀 파일 업로드</span>
+        </label>
+        <select id="periodSelect" disabled>
+          <option value="all">전체 기간</option>
+          <option value="1m">최근 1개월</option>
+          <option value="3m">최근 3개월</option>
+          <option value="6m">최근 6개월</option>
+        </select>
+        <select id="xColumnSelect" disabled>
+          <option value="">X축 컬럼 선택</option>
+        </select>
+        <select id="yColumnSelect" disabled>
+          <option value="">Y축 컬럼 선택</option>
+        </select>
+        <button id="newsletterBtn" disabled>요약 생성</button>
+        <button id="reportBtn" disabled>보고서 생성</button>
+        <button id="pdfBtn" class="secondary" disabled>PDF 다운로드</button>
+        <button id="resetBtn" class="secondary" disabled>초기화</button>
+      </div>
+      <div id="periodInfo" class="hint" style="margin-top:12px">기간을 선택하면 표와 그래프가 자동으로 바뀝니다.</div>
+    </section>
+
+    <section class="grid">
+      <div class="card">
+        <h2>자동 요약</h2>
+        <div class="prompt">
+          <div>• 선택한 기간 기준으로 자동 요약문을 생성합니다.</div>
+          <div>• 선택한 수치 기준으로 평균, 최고, 최저를 계산합니다.</div>
+        </div>
+        <div id="newsletterBox" class="newsletter" style="margin-top:14px">요약문이 여기에 표시됩니다.</div>
+      </div>
+      <div class="card">
+        <h2>선택 기간 추이 그래프</h2>
+        <div class="chart-box"><canvas id="chartCanvas"></canvas></div>
+      </div>
+    </section>
+
+    <section class="subgrid">
+      <div class="card table-card">
+        <h2>데이터 표</h2>
+        <div class="table-wrap">
+          <table>
+            <thead id="tableHead"></thead>
+            <tbody id="tableBody">
+              <tr><td class="empty-message" colspan="4">엑셀 파일을 업로드해 주세요.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p id="emptyMessage" class="empty-message hidden">표시할 데이터가 없습니다.</p>
+      </div>
+
+      <div id="reportArea" class="report">
+        <div class="report-title">데이터 추이 분석 보고서</div>
+        <div class="hint">보고서 생성 버튼을 누르면 선택 기간과 통화 기준으로 자동 생성됩니다.</div>
+        <div class="report-meta">
+          <div class="meta-item"><span>분석 기간</span><strong id="reportPeriod">-</strong></div>
+          <div class="meta-item"><span>선택 통화</span><strong id="reportCurrency">-</strong></div>
+          <div class="meta-item"><span>평균값</span><strong id="reportAvg">-</strong></div>
+          <div class="meta-item"><span>최고 / 최저값</span><strong id="reportMaxMin">-</strong></div>
+        </div>
+        <div class="report-body">
+          <section>
+            <h3>변화 요약</h3>
+            <div id="reportChange" class="hint">-</div>
+          </section>
+          <section>
+            <h3>추이 그래프</h3>
+            <div class="report-chart-box"><canvas id="reportChartCanvas"></canvas></div>
+          </section>
+          <section>
+            <h3>자동 분석 코멘트</h3>
+            <div id="reportComment" class="hint">-</div>
+          </section>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const state = {
+      rawRows: [],
+      headers: [],
+      fileName: '',
+      period: 'all',
+      xColumn: '',
+      yColumn: '',
+      summary: '',
+      chart: null,
+      reportChart: null
+    };
+
+    const els = {
+      fileInput: document.getElementById('fileInput'),
+      periodSelect: document.getElementById('periodSelect'),
+      xColumnSelect: document.getElementById('xColumnSelect'),
+      yColumnSelect: document.getElementById('yColumnSelect'),
+      newsletterBtn: document.getElementById('newsletterBtn'),
+      reportBtn: document.getElementById('reportBtn'),
+      pdfBtn: document.getElementById('pdfBtn'),
+      resetBtn: document.getElementById('resetBtn'),
+      fileName: document.getElementById('fileName'),
+      totalRows: document.getElementById('totalRows'),
+      visibleRows: document.getElementById('visibleRows'),
+      periodInfo: document.getElementById('periodInfo'),
+      newsletterBox: document.getElementById('newsletterBox'),
+      tableHead: document.getElementById('tableHead'),
+      tableBody: document.getElementById('tableBody'),
+      emptyMessage: document.getElementById('emptyMessage'),
+      reportPeriod: document.getElementById('reportPeriod'),
+      reportCurrency: document.getElementById('reportCurrency'),
+      reportAvg: document.getElementById('reportAvg'),
+      reportMaxMin: document.getElementById('reportMaxMin'),
+      reportChange: document.getElementById('reportChange'),
+      reportComment: document.getElementById('reportComment')
+    };
+
+    function parseDate(value) {
+      if (value instanceof Date) return value;
+      if (typeof value === 'number') return new Date((value - 25569) * 86400 * 1000);
+      const text = String(value || '').trim();
+      if (!text) return null;
+      const normalized = text.replace(/\./g, '-').replace(/\//g, '-');
+      const d = new Date(normalized);
+      return Number.isNaN(d.getTime()) ? null : d;
+    }
+
+    function formatDate(value) {
+      const d = parseDate(value);
+      if (!d) return String(value || '');
+      return d.toISOString().slice(0, 10);
+    }
+
+    function formatCell(value) {
+      if (value === null || value === undefined || value === '') return '';
+      return value instanceof Date ? formatDate(value) : String(value);
+    }
+
+    function toNumber(value) {
+      const n = Number(String(value).replace(/,/g, '').replace(/%/g, '').trim());
+      return Number.isFinite(n) ? n : NaN;
+    }
+
+    function isNumericLike(value) {
+      if (typeof value === 'number' && Number.isFinite(value)) return true;
+      const s = String(value).replace(/,/g, '').trim();
+      return s !== '' && Number.isFinite(Number(s));
+    }
+
+    function readFirstSheet(file) {
+      return file.arrayBuffer().then((buffer) => {
+        const workbook = XLSX.read(buffer, { type: 'array', cellDates: true });
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        return XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', blankrows: false, raw: false });
+      });
+    }
+
+    function normalizeRows(rows) {
+      const cleaned = rows.filter((row) => row.some((cell) => String(cell).trim() !== ''));
+      if (!cleaned.length) return { headers: [], data: [] };
+      const headers = cleaned[0].map((header, index) => String(header || `Column ${index + 1}`).trim());
+      const data = cleaned.slice(1).map((row) => headers.map((_, index) => row[index] ?? ''));
+      return { headers, data };
+    }
+
+    function getDateIndex() {
+      return state.headers.findIndex((h) => /날짜|일자|date|time|월|month/i.test(String(h)));
+    }
+
+    function getNumericIndexes(rows) {
+      const sample = rows.slice(0, 20);
+      return state.headers
+        .map((_, index) => ({ index, hits: sample.filter((row) => isNumericLike(row[index])).length }))
+        .filter((item) => item.hits >= Math.max(2, Math.ceil(sample.length / 3)))
+        .map((item) => item.index);
+    }
+
+    function filterByPeriod(rows) {
+      if (state.period === 'all') return rows;
+      const months = Number(state.period.replace('m', ''));
+      const cutoff = new Date();
+      cutoff.setMonth(cutoff.getMonth() - months);
+      const dateIndex = getDateIndex();
+      if (dateIndex === -1) return rows;
+      return rows.filter((row) => {
+        const d = parseDate(row[dateIndex]);
+        return d && d >= cutoff;
+      });
+    }
+
+    function getFilteredRows() {
+      return filterByPeriod(state.rawRows);
+    }
+
+    function getNumericStats(rows) {
+      const yIndex = Number(state.yColumn);
+      const values = rows.map((row) => toNumber(row[yIndex])).filter(Number.isFinite);
+      const avg = values.length ? values.reduce((a, b) => a + b, 0) / values.length : NaN;
+      return {
+        avg,
+        max: values.length ? Math.max(...values) : NaN,
+        min: values.length ? Math.min(...values) : NaN
+      };
+    }
+
+    function renderAxisOptions(rows) {
+      const dateIndex = getDateIndex();
+      const numericIndexes = getNumericIndexes(rows);
+      els.xColumnSelect.innerHTML = '<option value="">X축 컬럼 선택</option>';
+      els.yColumnSelect.innerHTML = '<option value="">Y축 컬럼 선택</option>';
+
+      state.headers.forEach((header, index) => {
+        const xOpt = document.createElement('option');
+        xOpt.value = String(index);
+        xOpt.textContent = header;
+        if (index === dateIndex) xOpt.selected = true;
+        els.xColumnSelect.appendChild(xOpt);
+
+        if (numericIndexes.includes(index)) {
+          const yOpt = document.createElement('option');
+          yOpt.value = String(index);
+          yOpt.textContent = header;
+          els.yColumnSelect.appendChild(yOpt);
+        }
+      });
+
+      state.xColumn = dateIndex >= 0 ? String(dateIndex) : '0';
+      state.yColumn = numericIndexes[0] !== undefined ? String(numericIndexes[0]) : '0';
+      els.xColumnSelect.value = state.xColumn;
+      els.yColumnSelect.value = state.yColumn;
+    }
+
+    function renderTableHead() {
+      const tr = document.createElement('tr');
+      state.headers.forEach((text) => {
+        const th = document.createElement('th');
+        th.textContent = text;
+        tr.appendChild(th);
+      });
+      els.tableHead.innerHTML = '';
+      els.tableHead.appendChild(tr);
+    }
+
+    function renderTable(rows) {
+      els.tableBody.innerHTML = '';
+      if (!rows.length) {
+        els.emptyMessage.classList.remove('hidden');
+        els.tableBody.innerHTML = '<tr><td class="empty-message" colspan="100%">표시할 데이터가 없습니다.</td></tr>';
+        return;
+      }
+      els.emptyMessage.classList.add('hidden');
+      const fragment = document.createDocumentFragment();
+      rows.forEach((row) => {
+        const tr = document.createElement('tr');
+        row.forEach((cell, index) => {
+          const td = document.createElement('td');
+          td.textContent = index === getDateIndex() ? formatDate(cell) : formatCell(cell);
+          tr.appendChild(td);
+        });
+        fragment.appendChild(tr);
+      });
+      els.tableBody.appendChild(fragment);
+    }
+
+    function renderChart(rows) {
+      if (state.chart) state.chart.destroy();
+      const xIndex = Number(state.xColumn);
+      const yIndex = Number(state.yColumn);
+      const series = rows
+        .map((row) => ({ x: row[xIndex], y: toNumber(row[yIndex]) }))
+        .filter((item) => item.x !== '' && item.x !== null && item.x !== undefined && Number.isFinite(item.y))
+        .map((item) => ({ x: parseDate(item.x) || item.x, y: item.y }))
+        .sort((a, b) => {
+          const ax = a.x instanceof Date ? a.x.getTime() : String(a.x);
+          const bx = b.x instanceof Date ? b.x.getTime() : String(b.x);
+          return ax < bx ? -1 : ax > bx ? 1 : 0;
+        });
+
+      const ctx = document.getElementById('chartCanvas');
+      state.chart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: series.map((item) => item.x instanceof Date ? formatDate(item.x) : String(item.x)),
+          datasets: [{
+            label: state.headers[yIndex] || '값',
+            data: series.map((item) => item.y),
+            borderColor: '#00a049',
+            backgroundColor: 'rgba(0,160,73,.12)',
+            fill: true,
+            tension: 0.25,
+            pointRadius: 2
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: true },
+            title: { display: true, text: '선택 기간 추이 그래프' }
+          },
+          scales: {
+            x: { title: { display: true, text: state.headers[xIndex] || 'X축' } },
+            y: { title: { display: true, text: state.headers[yIndex] || 'Y축' } }
+          }
+        }
+      });
+    }
+
+    function getPeriodLabel() {
+      if (state.period === '1m') return '최근 1개월';
+      if (state.period === '3m') return '최근 3개월';
+      if (state.period === '6m') return '최근 6개월';
+      return '전체 기간';
+    }
+
+    function buildNewsletter(rows) {
+      const label = getPeriodLabel();
+      const stats = getNumericStats(rows);
+      const xIndex = Number(state.xColumn);
+      const yIndex = Number(state.yColumn);
+      const items = rows.map((row) => ({ x: formatCell(row[xIndex]), y: toNumber(row[yIndex]) })).filter((item) => item.x && Number.isFinite(item.y));
+      const upLabel = items.length ? [...items].sort((a, b) => b.y - a.y)[0].x : '-';
+      const downLabel = items.length ? [...items].sort((a, b) => a.y - b.y)[0].x : '-';
+      const avgText = Number.isFinite(stats.avg) ? stats.avg.toFixed(2) : '-';
+      const maxText = Number.isFinite(stats.max) ? stats.max.toFixed(2) : '-';
+      const minText = Number.isFinite(stats.min) ? stats.min.toFixed(2) : '-';
+      const directionText = items.filter((item) => item.y > 0).length >= items.filter((item) => item.y < 0).length
+        ? '전반적으로 상승세'
+        : '전반적으로 하락세';
+
+      return `[${label} 데이터 브리핑]
+
+${label} 동안 선택한 값은 ${directionText}를 보였습니다.
+가장 큰 값은 ${upLabel}에서 나타났고, 가장 작은 값은 ${downLabel}에서 나타났습니다.
+선택 기간의 평균값은 ${avgText}, 최고값은 ${maxText}, 최저값은 ${minText}입니다.`;
+    }
+
+    function buildReportComment(rows) {
+      const stats = getNumericStats(rows);
+      const avgText = Number.isFinite(stats.avg) ? stats.avg.toFixed(2) : '-';
+      const yIndex = Number(state.yColumn);
+      const xIndex = Number(state.xColumn);
+      const items = rows.map((row) => ({ x: formatCell(row[xIndex]), y: toNumber(row[yIndex]) })).filter((item) => item.x && Number.isFinite(item.y));
+      const rise = items.filter((item) => item.y > 0).length;
+      const fall = items.filter((item) => item.y < 0).length;
+      if (!items.length) {
+        return '선택한 데이터에는 숫자 변화가 충분하지 않아 자세한 코멘트를 만들 수 없습니다. 날짜가 있는 행과 숫자 컬럼을 다시 선택해 보세요.';
+      }
+      if (rise >= fall) {
+        return `이 기간은 증가한 값이 더 많이 보입니다. 평균값은 ${avgText}이며, 표와 그래프를 함께 보면 어느 시점에 값이 커졌는지 확인하기 쉽습니다.`;
+      }
+      return `이 기간은 감소한 값이 더 많이 보입니다. 평균값은 ${avgText}이며, 숫자 변화가 완만하게 이어진 흐름입니다.`;
+    }
+
+    function renderReport(rows) {
+      const label = getPeriodLabel();
+      const stats = getNumericStats(rows);
+      const avgText = Number.isFinite(stats.avg) ? stats.avg.toFixed(2) : '-';
+      const maxText = Number.isFinite(stats.max) ? stats.max.toFixed(2) : '-';
+      const minText = Number.isFinite(stats.min) ? stats.min.toFixed(2) : '-';
+      const xLabel = state.headers[Number(state.xColumn)] || '전체';
+      const yLabel = state.headers[Number(state.yColumn)] || '값';
+
+      els.reportPeriod.textContent = label;
+      els.reportCurrency.textContent = `${xLabel} / ${yLabel}`;
+      els.reportAvg.textContent = avgText;
+      els.reportMaxMin.textContent = `${maxText} / ${minText}`;
+      els.reportChange.textContent = `선택 기간 기준으로 ${rows.length}건이 표시되며, 그래프와 표에서 변화를 함께 볼 수 있습니다.`;
+      els.reportComment.textContent = buildReportComment(rows);
+
+      if (state.reportChart) state.reportChart.destroy();
+      const xIndex = Number(state.xColumn);
+      const yIndex = Number(state.yColumn);
+      const series = rows
+        .map((row) => ({ x: row[xIndex], y: toNumber(row[yIndex]) }))
+        .filter((item) => item.x !== '' && item.x !== null && item.x !== undefined && Number.isFinite(item.y))
+        .map((item) => ({ x: parseDate(item.x) || item.x, y: item.y }))
+        .sort((a, b) => {
+          const ax = a.x instanceof Date ? a.x.getTime() : String(a.x);
+          const bx = b.x instanceof Date ? b.x.getTime() : String(b.x);
+          return ax < bx ? -1 : ax > bx ? 1 : 0;
+        });
+
+      state.reportChart = new Chart(document.getElementById('reportChartCanvas'), {
+        type: 'line',
+        data: {
+          labels: series.map((item) => item.x instanceof Date ? formatDate(item.x) : String(item.x)),
+          datasets: [{
+            label: yLabel,
+            data: series.map((item) => item.y),
+            borderColor: '#00a049',
+            backgroundColor: 'rgba(0,160,73,.12)',
+            fill: true,
+            tension: 0.25,
+            pointRadius: 2
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { display: false } },
+          scales: {
+            x: { title: { display: true, text: xLabel } },
+            y: { title: { display: true, text: yLabel } }
+          }
+        }
+      });
+    }
+
+    function updateVisibleCount(rows) {
+      els.totalRows.textContent = String(state.rawRows.length);
+      els.visibleRows.textContent = String(rows.length);
+    }
+
+    function renderAll() {
+      const rows = getFilteredRows();
+      renderTableHead();
+      renderTable(rows);
+      updateVisibleCount(rows);
+      renderChart(rows);
+      els.newsletterBox.textContent = state.summary || '요약문이 여기에 표시됩니다.';
+      els.periodInfo.textContent = `${getPeriodLabel()} 기준으로 ${rows.length}건이 표시됩니다.`;
+      const enabled = rows.length > 0 && state.xColumn !== '' && state.yColumn !== '';
+      els.newsletterBtn.disabled = !enabled;
+      els.reportBtn.disabled = !enabled;
+      els.pdfBtn.disabled = !enabled;
+    }
+
+    function resetFilters() {
+      state.period = 'all';
+      state.xColumn = '';
+      state.yColumn = '';
+      state.summary = '';
+      els.periodSelect.value = 'all';
+      els.xColumnSelect.value = '';
+      els.yColumnSelect.value = '';
+      renderAll();
+    }
+
+    async function handleFileUpload(file) {
+      const rows = await readFirstSheet(file);
+      const normalized = normalizeRows(rows);
+      state.rawRows = normalized.data.filter((row) => row.some((cell) => String(cell).trim() !== ''));
+      state.headers = normalized.headers;
+      state.fileName = file.name;
+      state.period = 'all';
+      state.xColumn = '';
+      state.yColumn = '';
+      state.summary = '';
+
+      els.fileName.textContent = file.name;
+      els.periodSelect.disabled = false;
+      els.xColumnSelect.disabled = false;
+      els.yColumnSelect.disabled = false;
+      els.newsletterBtn.disabled = false;
+      els.reportBtn.disabled = false;
+      els.pdfBtn.disabled = false;
+      els.resetBtn.disabled = false;
+
+      renderAxisOptions(state.rawRows);
+      renderAll();
+    }
+
+    els.fileInput.addEventListener('change', async (event) => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      await handleFileUpload(file);
+    });
+
+    els.periodSelect.addEventListener('change', () => {
+      state.period = els.periodSelect.value;
+      renderAll();
+    });
+
+    els.xColumnSelect.addEventListener('change', () => {
+      state.xColumn = els.xColumnSelect.value;
+      renderAll();
+    });
+
+    els.yColumnSelect.addEventListener('change', () => {
+      state.yColumn = els.yColumnSelect.value;
+      renderAll();
+    });
+
+    els.newsletterBtn.addEventListener('click', () => {
+      const rows = getFilteredRows();
+      state.summary = buildNewsletter(rows);
+      els.newsletterBox.textContent = state.summary;
+    });
+
+    els.reportBtn.addEventListener('click', () => {
+      const rows = getFilteredRows();
+      renderReport(rows);
+    });
+
+    els.pdfBtn.addEventListener('click', () => {
+      const element = document.getElementById('reportArea');
+      html2pdf().set({
+        margin: 10,
+        filename: '환율_추이_분석_보고서.pdf',
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { scale: 2 },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+      }).from(element).save();
+    });
+
+    els.resetBtn.addEventListener('click', () => {
+      state.rawRows = [];
+      state.headers = [];
+      state.fileName = '';
+      state.period = 'all';
+      state.xColumn = '';
+      state.yColumn = '';
+      state.summary = '';
+      els.fileInput.value = '';
+      els.periodSelect.disabled = true;
+      els.xColumnSelect.disabled = true;
+      els.yColumnSelect.disabled = true;
+      els.newsletterBtn.disabled = true;
+      els.reportBtn.disabled = true;
+      els.pdfBtn.disabled = true;
+      els.resetBtn.disabled = true;
+      els.fileName.textContent = '-';
+      els.totalRows.textContent = '0';
+      els.visibleRows.textContent = '0';
+      els.periodInfo.textContent = '기간을 선택하면 표와 그래프가 자동으로 바뀝니다.';
+      els.newsletterBox.textContent = '요약문이 여기에 표시됩니다.';
+      els.xColumnSelect.innerHTML = '<option value="">X축 컬럼 선택</option>';
+      els.yColumnSelect.innerHTML = '<option value="">Y축 컬럼 선택</option>';
+      els.tableHead.innerHTML = '';
+      els.tableBody.innerHTML = '<tr><td class="empty-message" colspan="4">엑셀 파일을 업로드해 주세요.</td></tr>';
+      els.emptyMessage.classList.add('hidden');
+      els.reportPeriod.textContent = '-';
+      els.reportCurrency.textContent = '-';
+      els.reportAvg.textContent = '-';
+      els.reportMaxMin.textContent = '-';
+      els.reportChange.textContent = '-';
+      els.reportComment.textContent = '-';
+      if (state.chart) state.chart.destroy();
+      if (state.reportChart) state.reportChart.destroy();
+      state.chart = null;
+      state.reportChart = null;
+    });
+  </script>
+</body>
+</html>
